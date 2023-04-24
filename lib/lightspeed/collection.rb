@@ -7,7 +7,7 @@ module Lightspeed
   class Collection
     PER_PAGE = 100 # the max page of records returned in a request
 
-    attr_accessor :context, :resources
+    attr_accessor :context, :resources, :next_page_url
 
     def initialize(context:, attributes: nil)
       self.context = context
@@ -33,7 +33,8 @@ module Lightspeed
     end
 
     def size(params: {})
-      params = params.merge(limit: 1, load_relations: nil)
+      params = params.merge(count: 1, load_relations: nil)
+      params.delete(:sort)
       get(params: params)['@attributes']['count'].to_i
     end
     alias_method :length, :size
@@ -65,8 +66,8 @@ module Lightspeed
 
     def enum_page(per_page: PER_PAGE, params: {})
       Enumerator.new do |yielder|
-        loop.with_index do |_, n|
-          resources = page(n, per_page: per_page, params: params)
+        loop do
+          resources = page(url: @next_page_url, per_page: per_page, params: params)
           yielder << resources
           raise StopIteration if resources.length < per_page
         end
@@ -131,9 +132,14 @@ module Lightspeed
       Yajl::Encoder.encode(as_json)
     end
 
-    def page(n, per_page: PER_PAGE, params: {})
-      params = params.merge(limit: per_page, offset: per_page * n)
-      instantiate(get(params: params))
+    def page(url: nil, per_page: PER_PAGE, params: {})
+      if !url
+        # our first page
+        instantiate(get(params: params))
+      else
+        # a cursor url
+        instantiate(get(url: url))
+      end
     end
 
     def load_relations_default
@@ -158,6 +164,14 @@ module Lightspeed
     def instantiate(response)
       return [] unless response.is_a?(Hash)
       @resources ||= {}
+      attributes = response["@attributes"]
+
+      @next_page_url = nil
+
+      if attributes
+        @next_page_url = attributes["next"].present? ? attributes["next"] : nil
+      end
+
       Array.wrap(response[resource_name]).map do |resource|
         resource = resource_class.new(context: self, attributes: resource)
         @resources[resource.id] = resource
@@ -172,15 +186,19 @@ module Lightspeed
       self.class.resource_name
     end
 
-    def get(params: {})
-      params = { load_relations: load_relations_default }
-        .merge(context_params)
-        .merge(params)
-        .compact
-      client.get(
-        path: collection_path,
-        params: params
-      )
+    def get(params: {}, url: nil)
+      if url.present?
+        client.get(url: url)
+      else
+        params = { load_relations: load_relations_default }
+          .merge(context_params)
+          .merge(params)
+          .compact
+        client.get(
+          path: collection_path,
+          params: params
+        )
+      end
     end
 
     def post(body:)

@@ -5,7 +5,7 @@ require 'net/http'
 
 module Lightspeed
   class Request
-    attr_accessor :raw_request, :bucket_max, :bucket_level
+    attr_accessor :raw_request, :bucket_max, :bucket_level, :url
 
     SECONDS_TO_WAIT_WHEN_THROTTLED = 60 # API requirements.
 
@@ -18,14 +18,15 @@ module Lightspeed
     end
 
     def self.base_host
-      "api.merchantos.com"
+      "api.lightspeedapp.com"
     end
 
     def self.base_path
-      "/API"
+      "/API/V3"
     end
 
-    def initialize(client, method:, path:, params: nil, body: nil)
+    def initialize(client, method:, path: nil, params: nil, body: nil, url: nil)
+      @url = url # this will trump the passed in arguments if set
       @method = method
       @params = params
       @path = path
@@ -107,9 +108,13 @@ module Lightspeed
     end
 
     def uri
-      uri = self.class.base_path + @path
-      uri += "?#{URI.encode_www_form(@params)}" if @params && @method == :get
-      uri
+      if !@url
+        uri = self.class.base_path + @path
+        uri += "?#{URI.encode_www_form(@params)}" if @params && @method == :get
+        uri
+      else
+        @url
+      end
     end
 
     def request_class
